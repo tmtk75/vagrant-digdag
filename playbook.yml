@@ -1,0 +1,123 @@
+- hosts: all
+  gather_facts: no
+  become: yes
+  tasks:
+    - hostname: name={{ inventory_hostname_short }}
+
+    - block:
+      - name: Download digdag
+        uri:
+          url: "https://dl.digdag.io/digdag-latest"
+          dest: /usr/local/bin/digdag
+          creates: /usr/local/bin/digdag
+      - name: Executable for digdag
+        file:
+          path: /usr/local/bin/digdag
+          state: file
+          mode: "0755"
+
+      tags:
+        - digdag
+
+    - block:
+      - yum: name={{ item }}
+        with_items:
+          - java-1.8.0-openjdk
+          - docker-io
+      - service:
+          name: docker
+          state: started
+
+      tags:
+        - yum
+
+    - block:
+      - yum: name=https://download.postgresql.org/pub/repos/yum/9.6/redhat/rhel-7-ppc64le/pgdg-centos96-9.6-3.noarch.rpm
+      - yum: name=postgresql96
+      tags:
+
+        - pgsql
+
+- hosts: node0
+  gather_facts: no
+  become: yes
+  tasks:
+    - block:
+      - yum: name={{ item }}
+        with_items:
+          - postgresql96-server
+          - postgresql96-contrib
+
+      - stat: path=/var/lib/pgsql/9.6/data/PG_VERSION
+        register: result_pgdata
+
+      - shell: /usr/pgsql-9.6/bin/initdb -D /var/lib/pgsql/9.6/data --no-locale
+        become: yes
+        become_user: postgres
+        when: not result_pgdata.stat.exists
+
+      - template: src=./postgresql.conf dest=/var/lib/pgsql/9.6/data/postgresql.conf mode=0600
+        notify: restart postgresql
+
+      - template: src=./pg_hba.conf dest=/var/lib/pgsql/9.6/data/pg_hba.conf mode=0600
+        notify: restart postgresql
+
+      - service: name=postgresql-9.6 state=started
+
+      tags:
+        - postgres
+
+    - block:
+      - shell: echo "\l digdag" | psql -U postgres | grep '1 rows'
+        ignore_errors: yes
+        register: result_psql
+
+      - shell: |
+          echo "CREATE DATABASE digdag;" | psql -U postgres
+        changed_when: result_psql.rc == 1
+        when: result_psql.rc == 1
+
+      tags:
+        - createdb
+
+  handlers:
+    - name: restart postgresql
+      service: name=postgresql-9.6 state=restarted
+
+- hosts: all
+  gather_facts: no
+  become: yes
+  tasks:
+    - block:
+      - file: path=/opt/digdag/bin state=directory owner=root
+      - file: path=/opt/digdag/conf state=directory owner=root
+      - template:
+          src: start.sh
+          dest: /opt/digdag/bin/start.sh
+          mode: 0755
+      - template:
+          src: postgresql.properties
+          dest: /opt/digdag/conf/postgresql.properties
+      - template:
+          src: ./digdag.service
+          dest: /etc/systemd/system/digdag.service
+          owner: root
+          group: root
+          mode: 0644
+      - shell: systemctl daemon-reload
+      - service: name=digdag state=started
+      tags:
+        - digdag.service
+
+- hosts: all
+  gather_facts: no
+  become: no
+  tasks:
+    - block:
+      - file: path=/home/vagrant/digdag-sample state=directory owner=vagrant
+      - template:
+          src: ./sample.dig
+          dest: /home/vagrant/digdag-sample/sample.dig
+      tags:
+        - digdag.sample
+

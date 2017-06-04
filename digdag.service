@@ -1,0 +1,9 @@
+[Unit]
+Description=digdag
+
+[Service]
+Restart=on-failure
+ExecStart=/opt/digdag/bin/start.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+timezone: Asia/Tokyo
+
+_export:
+  docker:
+    image: centos:7
+
++step0:
+  echo>: hello, world
